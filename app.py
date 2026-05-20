@@ -68,8 +68,6 @@ def parse_report(df):
         if cpt_col is None:
             continue
 
-        # Column layout relative to CPT:
-        # +2 = minutes, +7 = treating provider, +10 = charge amount
         try:
             treating = str(row_vals[cpt_col + 7] or "").strip()
             charge_raw = str(row_vals[cpt_col + 10] or "")
@@ -125,20 +123,23 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file:
     try:
-        engine = "xlrd" if uploaded_file.name.endswith(".xls") else "openpyxl"
-        df = pd.read_excel(uploaded_file, engine=engine, header=None)
+        file_bytes = BytesIO(uploaded_file.read())
+        if uploaded_file.name.endswith(".xlsx"):
+            df = pd.read_excel(file_bytes, engine="openpyxl", header=None)
+        else:
+            # Use xlrd for legacy .xls files
+            df = pd.read_excel(file_bytes, engine="xlrd", header=None)
+
         results, report_period = parse_report(df)
 
         if not results:
             st.error("No charge data found. Please check that this is the Charges Entered By User report.")
         else:
-            # ── Header ────────────────────────────────────────────────────────
             if report_period:
                 st.subheader(f"Results — {report_period}")
             else:
                 st.subheader("Results")
 
-            # ── Summary metrics ───────────────────────────────────────────────
             total_hrs = sum(r["Total Hrs"] for r in results)
             avg_hrs = total_hrs / len(results) if results else 0
 
@@ -149,10 +150,8 @@ if uploaded_file:
 
             st.divider()
 
-            # ── Results table ─────────────────────────────────────────────────
             results_df = pd.DataFrame(results)
 
-            # Format display
             display_df = results_df.copy()
             display_df["Total Billed"] = display_df["Total Billed"].apply(lambda x: f"${x:,.2f}")
             display_df["Eval $"] = display_df["Eval $"].apply(lambda x: f"${x:,.2f}" if x > 0 else "—")
@@ -165,14 +164,10 @@ if uploaded_file:
                 display_df,
                 use_container_width=True,
                 hide_index=True,
-                column_config={
-                    "Total Hrs": st.column_config.TextColumn("Total Hrs", width="small"),
-                }
             )
 
             st.caption("Eval hours apply the 8-minute rule per individual visit. Therapy hours = (total billed − eval $) ÷ rate.")
 
-            # ── Export ────────────────────────────────────────────────────────
             csv = results_df.to_csv(index=False)
             filename = f"billable_hours_{report_period.replace('/', '-').replace(' ', '') if report_period else 'export'}.csv"
             st.download_button(
